@@ -17,6 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/3.4.3/tailwind.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script defer>if(window.tailwind){window.tailwind.config={corePlugins:{preflight:false}};}</script>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
@@ -8280,6 +8281,10 @@ footer::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;back
         <input class="form-input" type="tel" id="custPhone" placeholder="+20 XXX XXX XXXX">
       </div>
       <div class="form-group">
+        <label class="form-label">// Email (optional — for order confirmation)</label>
+        <input class="form-input" type="email" id="custEmail" placeholder="you@example.com">
+      </div>
+      <div class="form-group">
         <label class="form-label">// Game Username / ID</label>
         <input class="form-input" type="text" id="custGame" placeholder="Your in-game username or ID">
       </div>
@@ -8838,6 +8843,46 @@ footer::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;back
 const SUPABASE_URL = 'https://wzqgvjyxgzrtgbzdwopr.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6cWd2anl4Z3pydGdiemR3b3ByIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1MTY0MjgsImV4cCI6MjEwMzA5MjQyOH0.03kGCCVN2CGPcpT3N0u1QT-Z7yKJ8b-deNzL97wQN9E';
 const BACKEND_CONFIGURED = SUPABASE_URL !== 'YOUR_SUPABASE_PROJECT_URL' && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
+
+// ═══ EMAILJS (auto order emails) ═══
+// Get these 4 values free at emailjs.com — Account > General (Public Key),
+// Email Services (Service ID), Email Templates (2 templates, see setup notes
+// sent alongside this file for the exact variable names each template needs).
+const EMAILJS_PUBLIC_KEY      = 'nBJJLQ9fpiidvls5Q';
+const EMAILJS_SERVICE_ID      = 'service_flxouny';
+const EMAILJS_TEMPLATE_OWNER  = 'template_h7140vv';    // notifies you (Fahd) of the order
+const EMAILJS_TEMPLATE_CUSTOMER = 'template_r52qp1j'; // confirms the order to the customer
+const EMAILJS_CONFIGURED = EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC_KEY'
+  && EMAILJS_SERVICE_ID !== 'YOUR_EMAILJS_SERVICE_ID'
+  && EMAILJS_TEMPLATE_OWNER !== 'YOUR_EMAILJS_TEMPLATE_ID_OWNER';
+if (EMAILJS_CONFIGURED && typeof emailjs !== 'undefined') emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+
+// Fires the order emails in the background — never blocks or delays the
+// WhatsApp redirect or the success modal. Always sends the owner
+// notification; only sends the customer confirmation if they gave an email.
+function sendOrderEmails({ ref, name, phone, email, game, itemsText, total }) {
+  if (!EMAILJS_CONFIGURED || typeof emailjs === 'undefined') return;
+
+  const commonParams = {
+    order_ref: ref,
+    customer_name: name,
+    customer_phone: phone,
+    customer_email: email || '(not provided)',
+    game_id: game || '(not provided)',
+    order_items: itemsText,
+    order_total: total.toLocaleString() + ' EGP'
+  };
+
+  emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_OWNER, commonParams)
+    .catch(err => console.error('Owner notification email failed:', err));
+
+  if (email) {
+    emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_CUSTOMER, {
+      ...commonParams,
+      to_email: email
+    }).catch(err => console.error('Customer confirmation email failed:', err));
+  }
+}
 /* FIX: the supabase-js CDN <script> tag uses "defer", which always runs AFTER this
    inline script (inline scripts execute immediately during parsing; deferred scripts
    wait until the whole document is parsed). That means window.supabase was reliably
@@ -9877,6 +9922,18 @@ function sendOrder() {
     // Extremely rare fallback if the browser blocks it anyway: navigate directly.
     window.location.href = `https://wa.me/201554000381?text=${encodeURIComponent(msg)}`;
   }
+
+  // Send order emails (owner notification + optional customer confirmation),
+  // in the background — never delays or risks the WhatsApp redirect above.
+  sendOrderEmails({
+    ref: currentOrderRef,
+    name: document.getElementById('custName').value.trim(),
+    phone: document.getElementById('custPhone').value.trim(),
+    email: document.getElementById('custEmail').value.trim(),
+    game: document.getElementById('custGame').value.trim(),
+    itemsText: cart.map(i => `${i.name} x${i.qty} — ${(i.price*i.qty).toLocaleString()} EGP`).join('\n'),
+    total: getTotal()
+  });
 
   // Save the order to the backend (if connected) so it shows up in the admin panel.
   // This now happens in the background and never delays or risks the WhatsApp redirect.
